@@ -28,12 +28,19 @@ Install dependencies:
 
 Reproducibility
 ----------------
-Locking start_date/end_date is NOT enough on its own: Yahoo Finance
-quietly revises historical adjusted closing prices over time (dividend
-and split adjustments get recomputed retroactively), so re-pulling "the
-same" date range on two different days can still return slightly
-different numbers - we saw this firsthand (1,007 vs. 1,008 trading
-days on two live pulls of an identical date range).
+Locking start_date/end_date is NOT enough on its own, for two reasons:
+
+1. yfinance's own `end` argument is EXCLUSIVE of the date you pass it -
+   requesting end="2026-09-21" silently drops September 21st itself.
+   fetch_price_data() below corrects for this internally (it adds one
+   calendar day before calling yfinance), so end_date is always treated
+   as the LAST trading day actually included, as a human would read it.
+2. Even with that fixed, Yahoo Finance can still revise historical
+   adjusted closing prices after the fact (dividend/split adjustments
+   get recomputed retroactively), so re-pulling "the same" date range
+   on two very different days is not guaranteed to be byte-for-byte
+   identical - this is a smaller, residual effect, and the reason this
+   script does not rely on "lock the dates and re-pull live" at all.
 
 So this script ships in two modes, set by ANALYSIS_MODE below:
 
@@ -87,10 +94,13 @@ def fetch_price_data(
     Finance revising historical prices - this is what makes the PDF
     report's numbers reproducible forever.
 
-    mode="live": download fresh data from Yahoo Finance, start_date to
-    end_date (pass end_date=None for "today"). The numbers you get back
-    will then legitimately drift slightly from the PDF report over time
-    - that's expected vendor-side data revision, not a bug.
+    mode="live": download fresh data from Yahoo Finance, start_date up
+    to and INCLUDING end_date (pass end_date=None for "today"). Note
+    that yfinance's own `end` argument is EXCLUSIVE (it stops the day
+    BEFORE the date you pass it), so we quietly add one calendar day
+    before calling it - otherwise end_date="2026-09-21" would silently
+    drop September 21st itself, which is exactly the off-by-one bug
+    that produced the 1,007-vs-1,008-day mismatch you saw earlier.
     """
     if mode == "reproducible":
         if not os.path.exists(snapshot_path):
@@ -106,12 +116,16 @@ def fetch_price_data(
         df = pd.read_csv(snapshot_path, index_col=0, parse_dates=True)
 
     elif mode == "live":
-        pull_end_date = end_date or pd.Timestamp.today().date().isoformat()
-        print(f"Downloading P911.DE and RACE.MI prices (LIVE): {start_date} to {pull_end_date} ...")
+        last_day_wanted = pd.Timestamp(end_date) if end_date else pd.Timestamp.today().normalize()
+        # yfinance's `end` is exclusive of that date, so ask for one day
+        # past the last day we actually want included.
+        yfinance_end = (last_day_wanted + pd.Timedelta(days=1)).date().isoformat()
+        print(f"Downloading P911.DE and RACE.MI prices (LIVE): {start_date} "
+              f"to {last_day_wanted.date()} (inclusive) ...")
         raw = yf.download(
             ["P911.DE", "RACE.MI"],
             start=start_date,
-            end=pull_end_date,
+            end=yfinance_end,
             auto_adjust=True,
             progress=False,
         )["Close"]
