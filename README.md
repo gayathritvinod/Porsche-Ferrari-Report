@@ -69,7 +69,7 @@ Five steps, run top to bottom. No classes, no custom logging, no abstract wrappe
 
 ```bash
 git clone https://github.com/gayathritvinod/Porsche-Ferrari-Report.git
-cd porsche-ferrari-quant-framework
+cd Porsche-Ferrari-Report
 pip install -r requirements.txt
 ```
 
